@@ -4,6 +4,7 @@ import App from './App';
 import * as ai from './ai';
 import { createEntry, ENTRIES_KEY, persistSettings, saveEntries } from './journal';
 import type { AIResult } from './types';
+import { StrictMode } from 'react';
 
 beforeEach(() => localStorage.clear());
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
@@ -90,6 +91,33 @@ it('locks the second tab to read-only when another writer holds the browser lock
   fireEvent.click(screen.getByRole('button', { name: '记录今天' }));
   expect(localStorage.getItem(ENTRIES_KEY)).toBeNull();
   Reflect.deleteProperty(navigator, 'locks');
+});
+
+it('can write when StrictMode re-runs the lock effect before the first callback', async () => {
+  let held = false;
+  Object.defineProperty(navigator, 'locks', { configurable: true, value: {
+    request: vi.fn((_name, _options, callback) => {
+      const acquired = !held;
+      if (acquired) held = true;
+      return new Promise<void>(resolve => setTimeout(() => {
+        Promise.resolve(callback(acquired ? { name: 'little-days.writer' } : null)).then(() => {
+          if (acquired) held = false;
+          resolve();
+        });
+      }, 0));
+    }),
+  } });
+  try {
+    render(<StrictMode><App /></StrictMode>);
+    await waitFor(() => {
+      fireEvent.click(screen.getByRole('button', { name: '记录今天' }));
+      expect(localStorage.getItem(ENTRIES_KEY)).not.toBeNull();
+    });
+    expect(screen.queryByRole('alert')).toBeNull();
+  } finally {
+    cleanup();
+    Reflect.deleteProperty(navigator, 'locks');
+  }
 });
 
 it('archives, resumes and deletes a complete entry', async () => {

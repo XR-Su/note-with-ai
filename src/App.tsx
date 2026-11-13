@@ -47,27 +47,33 @@ export default function App() {
     if (!navigator.locks || initial.blocked) return;
     let cancelled = false;
     let release: (() => void) | undefined;
-    void navigator.locks.request('little-days.writer', { ifAvailable: true }, async lock => {
+    // StrictMode can clean up and rerun this effect before the lock callback runs.
+    // Skip a cancelled setup before requesting a lock that the next setup needs.
+    void Promise.resolve().then(() => {
       if (cancelled) return;
-      if (!lock) {
-        writeBlocked.current = true;
-        setStorageError('另一个标签页正在使用日记。本页只读；请关闭另一个标签页后刷新，避免覆盖记录。');
-        return;
-      }
-      try {
-        const fresh = readEntries(localStorage);
-        lastSaved.current = localStorage.getItem(ENTRIES_KEY);
-        entriesRef.current = fresh;
-        setEntries(fresh);
-      } catch (error) {
-        writeBlocked.current = true;
-        setStorageError((error as Error).message);
-        return;
-      }
-      writeReady.current = true;
-      await new Promise<void>(resolve => { release = resolve; });
-      writeReady.current = false;
+      return navigator.locks.request('little-days.writer', { ifAvailable: true }, async lock => {
+        if (cancelled) return;
+        if (!lock) {
+          writeBlocked.current = true;
+          setStorageError('另一个标签页正在使用日记。本页只读；请关闭另一个标签页后刷新，避免覆盖记录。');
+          return;
+        }
+        try {
+          const fresh = readEntries(localStorage);
+          lastSaved.current = localStorage.getItem(ENTRIES_KEY);
+          entriesRef.current = fresh;
+          setEntries(fresh);
+        } catch (error) {
+          writeBlocked.current = true;
+          setStorageError((error as Error).message);
+          return;
+        }
+        writeReady.current = true;
+        await new Promise<void>(resolve => { release = resolve; });
+        writeReady.current = false;
+      });
     }).catch(() => {
+      if (cancelled) return;
       writeBlocked.current = true;
       setStorageError('无法获取浏览器写入权限，请刷新重试或导出备份。');
     });
