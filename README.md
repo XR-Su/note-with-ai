@@ -21,6 +21,16 @@ npm run preview
 
 `dist/` 可以部署到静态托管服务。建议使用 HTTPS；不要通过双击 `index.html` 的 `file://` 地址运行。
 
+## 部署到 GitHub Pages
+
+仓库已包含 GitHub Actions 工作流：推送到 `main` 或 `git-deployment` 分支后，会安装依赖、运行测试并构建，然后将 `dist/` 发布到 GitHub Pages。
+
+1. 在 GitHub 仓库的 **Settings → Pages → Build and deployment** 中，将 **Source** 设为 **GitHub Actions**。
+2. 将项目提交并推送到 `main` 或 `git-deployment`。在仓库的 **Actions** 页面查看 **Deploy to GitHub Pages** 的运行结果。
+3. 部署成功后，从 **Settings → Pages** 打开网站。当前仓库的默认地址通常是 `https://xr-su.github.io/note-with-ai/`；实际地址以 GitHub 显示为准。也可以在工作流进入默认分支后，通过 Actions 页面手动运行。
+
+无需把 `dist/` 提交到 Git，也无需在仓库中保存 AI 密钥。日记和可选保存的密钥属于浏览器的当前网站来源；从本地开发地址切换到 Pages 后，原记录不会自动出现，请先导出 JSON 备份再导入。浏览器直连模型服务是否可用，仍取决于服务商的跨域策略和网络。
+
 ## 功能
 
 - 当天日记：按浏览器本地日期每天一篇，多次打开继续记录。
