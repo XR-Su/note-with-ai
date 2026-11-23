@@ -17,6 +17,7 @@ If mainly Chinese, translation=true and explanation="". If English, translation=
 Ask exactly ONE short contextual English follow-up question (question) with Chinese assistance (chinese). Include a short empathetic acknowledgement in question if useful. Gradually explore events, feelings, people and reflection without repetitive generic prompts. The user decides when to end.
 For action correct: only correct/translate the LAST user answer as above; question and chinese are empty strings.
 For action archive: generate a short English title (title) and first-person English diary summary (summary, 80-180 words or shorter for short entries), using ONLY user-provided facts and preserving nuance. Do not summarize your own questions as events. Other fields are empty strings and translation=false.
+Archive title and summary must be entirely in English, including quoted speech and cultural terms. Translate Chinese expressions into natural English (for example, 徽派建筑 becomes Huizhou-style architecture). Use established English names or Latin-letter pinyin for proper names. Never copy Chinese characters or Chinese/fullwidth punctuation into either field; use English punctuation. Check both fields for these before returning the JSON.
 All fields must always be present, with exactly these types:
 {"english":"string","explanation":"string","translation":false,"question":"string","chinese":"string","title":"string","summary":"string"}`;
   const body = {
@@ -58,6 +59,9 @@ All fields must always be present, with exactly these types:
       if (!parsed || fields.some(k => typeof parsed[k] !== 'string') || typeof parsed.translation !== 'boolean' ||
         (action !== 'archive' && !parsed.english.trim()) || (action === 'chat' && (!parsed.question.trim() || !parsed.chinese.trim())) ||
         (action === 'archive' && (!parsed.summary.trim() || !parsed.title.trim()))) throw new Error('AI 返回格式无效，请手动重试。');
+      if (action === 'archive' && [parsed.title, parsed.summary].some(text => /[\p{Script=Han}\u3000-\u303f\uff00-\uffef]/u.test(text))) {
+        throw new Error('AI 生成的归档标题或正文仍包含中文或中文标点，未完成归档。原文已保留，请手动重试。');
+      }
       return { ...parsed, explanation: parsed.translation ? '' : parsed.explanation } as AIResult;
     } catch (error) {
       if (error instanceof SyntaxError) throw new Error('AI 返回格式无效，请手动重试。原文不会丢失。');

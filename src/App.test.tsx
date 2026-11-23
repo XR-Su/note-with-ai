@@ -154,3 +154,30 @@ it('archives, resumes and deletes a complete entry', async () => {
   fireEvent.click(screen.getByRole('button', { name: '确认删除' }));
   expect(JSON.parse(localStorage.getItem(ENTRIES_KEY)!)).toEqual([]);
 });
+
+it('preserves the conversation when an archive contains Chinese and saves only after a successful manual retry', async () => {
+  const entry = createEntry([], 'daily');
+  entry.messages.push({ id: 'u1', role: 'user', content: '西递的徽派建筑让我印象深刻。', english: 'Xidi’s Huizhou-style architecture impressed me.' });
+  saveEntries(localStorage, [entry]);
+  const response = (summary: string) => new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ ...result, summary }) }, finish_reason: 'stop' }] }));
+  const fetcher = vi.fn()
+    .mockResolvedValueOnce(response('Xidi’s 徽派建筑 impressed me.'))
+    .mockResolvedValueOnce(response('Xidi’s Huizhou-style architecture impressed me.'));
+  vi.stubGlobal('fetch', fetcher);
+  prepare();
+  fireEvent.click(screen.getByRole('button', { name: '结束并归档' }));
+  await screen.findByText(/归档标题或正文仍包含中文/);
+  const failed = JSON.parse(localStorage.getItem(ENTRIES_KEY)!)[0];
+  expect(failed.archived).toBe(false);
+  expect(failed.title).toBe(entry.title);
+  expect(failed.summary).toBe('');
+  expect(failed.messages).toEqual(entry.messages);
+  expect(fetcher).toHaveBeenCalledTimes(1);
+  fireEvent.click(screen.getByRole('button', { name: '重试本次请求' }));
+  await screen.findByText('Xidi’s Huizhou-style architecture impressed me.');
+  const saved = JSON.parse(localStorage.getItem(ENTRIES_KEY)!)[0];
+  expect(saved.archived).toBe(true);
+  expect(saved.summary).toBe('Xidi’s Huizhou-style architecture impressed me.');
+  expect(saved.messages).toEqual(entry.messages);
+  expect(fetcher).toHaveBeenCalledTimes(2);
+});

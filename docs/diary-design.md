@@ -14,6 +14,8 @@ Use browser localStorage only for entries, input drafts and non-secret settings.
 
 Archive only after successful AI generation of an English title and first-person summary based on the current entry. Retain the complete conversation. Archived entries may resume; resuming clears the stale summary. Editing an original regenerates its English version without deleting later conversation, reopens the entry, and clears stale summary. Retry failed responses without duplicating original answers. No fabricated AI translations or summaries when offline.
 
+Newly generated archive titles and summaries must use English throughout, translating cultural terms and using English names or Latin-letter pinyin for proper names. Reject Han characters and Chinese/fullwidth punctuation before saving; retain the original conversation and offer manual retry without an automatic paid request. Existing archives and Chinese interface labels remain unchanged.
+
 ## AI Boundary
 
 Call mainland DeepSeek and MiniMax directly from the browser using user-provided provider keys. No OpenAI service or SDK. Use fetch with Authorization Bearer and fixed HTTPS provider URLs. DeepSeek model deepseek-flash with thinking disabled and JSON mode. MiniMax model MiniMax-M3.1-Flash with reasoning_effort low, split reasoning, and prompt-enforced JSON validated locally. Timeout at 90 seconds; cancellation and malformed, truncated, authorization, balance, rate-limit, network/CORS responses produce actionable Chinese errors. Only the active entry is sent, never other journal history or drafts. Corrections send context up to the edited message. No automatic paid retry.

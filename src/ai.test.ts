@@ -40,6 +40,24 @@ it('rejects truncated output', async () => {
   respond(JSON.stringify(answer), 200, 'length');
   await expect(requestAI(entry(), defaultSettings, 'key', 'chat')).rejects.toThrow(/截断/);
 });
+it.each([
+  { title: 'A visit to 西递' },
+  { summary: 'Xidi was a good example of 徽派建筑.' },
+  { summary: 'I saw 𠀀 on the sign.' },
+  { summary: 'I enjoyed Huizhou-style architecture。' },
+  { title: 'A quiet day：a walk' },
+])('rejects mixed-language archive output %j without automatic retry', async (fields) => {
+  const fetcher = respond(JSON.stringify({ ...answer, ...fields }));
+  await expect(requestAI(entry(), defaultSettings, 'key', 'archive')).rejects.toThrow(/未完成归档.*原文已保留.*手动重试/);
+  expect(fetcher).toHaveBeenCalledTimes(1);
+});
+it.each(['deepseek', 'minimax'] as const)('accepts English archive output with cultural names and English punctuation for %s', async (provider) => {
+  const archive = { ...answer, title: 'Xidi and Xiuli: A Festive Night', summary: 'Xidi’s Huizhou-style architecture impressed me — Xiuli felt like Chinese New Year.' };
+  const fetcher = respond(JSON.stringify(archive));
+  expect(await requestAI(entry(), { ...defaultSettings, provider }, 'key', 'archive')).toEqual(archive);
+  const body = JSON.parse(fetcher.mock.calls[0][1].body);
+  expect(body.messages[0].content).toContain('Archive title and summary must be entirely in English');
+});
 it.each([[401, '密钥'], [402, '余额'], [429, '频繁'], [500, '服务']])('gives actionable HTTP %s errors', async (status, text) => {
   respond('', status);
   await expect(requestAI(entry(), defaultSettings, 'key', 'chat')).rejects.toThrow(text);
