@@ -29,6 +29,23 @@ it('opens API settings with key opt-in disabled', () => {
   expect((screen.getByRole('checkbox', { name: /记住/ }) as HTMLInputElement).checked).toBe(false);
 });
 
+it('keeps both provider keys when switching, saving and reopening settings', () => {
+  render(<App />);
+  fireEvent.click(screen.getByRole('button', { name: 'AI 设置' }));
+  fireEvent.change(screen.getByLabelText('DeepSeek API 密钥'), { target: { value: 'deepseek-test-key' } });
+  expect(screen.queryByLabelText('MiniMax API 密钥')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: /M MiniMax/ }));
+  expect(screen.queryByLabelText('DeepSeek API 密钥')).toBeNull();
+  fireEvent.change(screen.getByLabelText('MiniMax API 密钥'), { target: { value: 'minimax-test-key' } });
+  fireEvent.click(screen.getByRole('button', { name: /D DeepSeek/ }));
+  expect((screen.getByLabelText('DeepSeek API 密钥') as HTMLInputElement).value).toBe('deepseek-test-key');
+  fireEvent.click(screen.getByRole('button', { name: /保存设置/ }));
+  fireEvent.click(screen.getByRole('button', { name: 'AI 设置' }));
+  expect((screen.getByLabelText('DeepSeek API 密钥') as HTMLInputElement).value).toBe('deepseek-test-key');
+  fireEvent.click(screen.getByRole('button', { name: /M MiniMax/ }));
+  expect((screen.getByLabelText('MiniMax API 密钥') as HTMLInputElement).value).toBe('minimax-test-key');
+});
+
 const result: AIResult = { english: 'I enjoyed a walk.', explanation: '使用过去时。', translation: false,
   question: 'What did you enjoy?', chinese: '你喜欢什么？', title: 'A quiet day', summary: 'I enjoyed a quiet walk.' };
 
