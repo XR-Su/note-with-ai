@@ -1,7 +1,7 @@
 import { useDeferredValue, useEffect, useRef, useState } from 'react';
 import { ArrowDownToLine, ArrowLeft, ArrowRight, BookOpen, Check, ChevronDown, CircleHelp, Clock3, Feather, History, Leaf, LoaderCircle, Menu, MessageCircle, Pencil, Plus, Search, Send, Settings2, ShieldCheck, Sparkles, Sun, Trash2, Upload, X } from 'lucide-react';
 import type { AIAction, Entry, Mode, Settings } from './types';
-import { createEntry, ENTRIES_KEY, localDate, mergeEntries, persistSettings, readEntries, readSettings, saveEntries } from './journal';
+import { archivedContext, createEntry, ENTRIES_KEY, localDate, mergeEntries, persistSettings, readEntries, readSettings, saveEntries } from './journal';
 import { providers, requestAI } from './ai';
 import SettingsDialog from './components/SettingsDialog';
 
@@ -157,7 +157,8 @@ export default function App() {
     setRetry(null);
     try {
       const context = action === 'correct' ? { ...entry, messages: entry.messages.slice(0, entry.messages.findIndex(m => m.id === messageId) + 1) } : entry;
-      const result = await requestAI(context, settings, key, action, controller.signal);
+      const history = action === 'chat' ? archivedContext(entriesRef.current, entry, settings.memoryDays) : [];
+      const result = await requestAI(context, settings, key, action, controller.signal, history);
       if (controller.signal.aborted || operation.current !== controller) return;
       updateEntry(entry.id, current => {
         if (action === 'archive') return { ...current, title: result.title, summary: result.summary, archived: true };
