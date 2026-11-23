@@ -1,8 +1,27 @@
-import type { Entry, Mode, Settings } from './types';
+import type { ArchivedContext, Entry, Mode, Settings } from './types';
 
 export const ENTRIES_KEY = 'little-days.entries.v1';
 export const SETTINGS_KEY = 'little-days.settings.v1';
-export const defaultSettings: Settings = { provider: 'deepseek', rememberKeys: false, keys: { deepseek: '', minimax: '' } };
+export const defaultSettings: Settings = { provider: 'deepseek', memoryDays: 0, rememberKeys: false, keys: { deepseek: '', minimax: '' } };
+
+export function validMemoryDays(value: unknown): value is number {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= 180;
+}
+
+export function archivedContext(entries: Entry[], current: Entry, days: number): ArchivedContext[] {
+  if (current.mode !== 'daily' || !validMemoryDays(days) || days === 0) return [];
+  // UTC arithmetic on date-only strings avoids daylight-saving changes to calendar windows.
+  const anchor = Date.parse(`${current.date}T00:00:00Z`);
+  if (!Number.isFinite(anchor) || new Date(anchor).toISOString().slice(0, 10) !== current.date) return [];
+  const firstDate = new Date(anchor - days * 86400000).toISOString().slice(0, 10);
+  return entries.filter(e => {
+    const date = Date.parse(`${e.date}T00:00:00Z`);
+    return e.id !== current.id && e.mode === 'daily' && e.archived && e.summary.trim() &&
+      Number.isFinite(date) && new Date(date).toISOString().slice(0, 10) === e.date &&
+      e.date >= firstDate && e.date < current.date;
+  }).sort((a, b) => a.date.localeCompare(b.date))
+    .map(({ date, title, summary }) => ({ date, title, summary }));
+}
 
 export function localDate(date = new Date()): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
@@ -66,6 +85,7 @@ export function mergeEntries(existing: Entry[], imported: unknown): Entry[] {
 }
 
 export function persistSettings(storage: Pick<Storage, 'setItem'>, settings: Settings): void {
+  if (!validMemoryDays(settings.memoryDays)) throw new Error('日记记忆追溯天数必须是 0–180 的整数。');
   try { storage.setItem(SETTINGS_KEY, JSON.stringify({ ...settings, keys: settings.rememberKeys ? settings.keys : { deepseek: '', minimax: '' } })); }
   catch { throw new Error('设置保存失败，请检查浏览器本地存储权限。'); }
 }
@@ -75,7 +95,7 @@ export function readSettings(storage?: Pick<Storage, 'getItem'>): Settings {
     storage ??= localStorage;
     const s = JSON.parse(storage.getItem(SETTINGS_KEY) || 'null');
     if (!s) return { ...defaultSettings, keys: { ...defaultSettings.keys } };
-    return { provider: s.provider === 'minimax' ? 'minimax' : 'deepseek', rememberKeys: s.rememberKeys === true,
+    return { provider: s.provider === 'minimax' ? 'minimax' : 'deepseek', memoryDays: validMemoryDays(s.memoryDays) ? s.memoryDays : 0, rememberKeys: s.rememberKeys === true,
       keys: { deepseek: s.rememberKeys === true && typeof s.keys?.deepseek === 'string' ? s.keys.deepseek : '', minimax: s.rememberKeys === true && typeof s.keys?.minimax === 'string' ? s.keys.minimax : '' } };
   } catch { return { ...defaultSettings, keys: { ...defaultSettings.keys } }; }
 }

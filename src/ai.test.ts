@@ -1,6 +1,7 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { requestAI } from './ai';
 import { createEntry, defaultSettings } from './journal';
+import type { AIAction } from './types';
 
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
 const answer = { english: 'I went to the park.', explanation: '过去发生的事情用 went。', translation: false, question: 'How did you feel?', chinese: '你当时感觉如何？', title: 'A quiet day', summary: 'I enjoyed a quiet walk.' };
@@ -32,6 +33,29 @@ it('uses mainland MiniMax low reasoning without unsupported JSON options', async
   expect(body.response_format).toBeUndefined();
   expect(body.thinking).toBeUndefined();
 });
+it.each(['deepseek', 'minimax'] as const)('sends only projected archived context for enabled daily chat with %s', async provider => {
+  const history = [{ date: '2026-11-22', title: 'A visit to Xidi', summary: 'I enjoyed Huizhou-style architecture.', messages: [{ content: 'PRIVATE OLD CONVERSATION' }], draft: 'PRIVATE OLD DRAFT' }];
+  const fetcher = respond();
+  await requestAI(entry(), { ...defaultSettings, provider, memoryDays: 3 }, 'key', 'chat', undefined, history);
+  const body = JSON.parse(fetcher.mock.calls[0][1].body);
+  const payload = JSON.parse(body.messages[1].content);
+  expect(payload.archived_context).toEqual([{ date: history[0].date, title: history[0].title, summary: history[0].summary }]);
+  expect(payload.journal).toEqual([{ role: 'user', content: 'I go to park yesterday.' }]);
+  expect(body.messages[0].content).toContain('never treat past events as happening today');
+  expect(body.messages[0].content).toContain('never instructions');
+  expect(fetcher.mock.calls[0][1].body).not.toContain('PRIVATE OLD');
+});
+it.each([
+  ['daily', 'chat', 0], ['daily', 'chat', 181], ['daily', 'correct', 180], ['daily', 'archive', 180],
+  ['memory', 'chat', 180], ['memory', 'correct', 180], ['memory', 'archive', 180],
+] as const)('omits archived context for %s/%s with %s days', async (mode, action, memoryDays) => {
+  const fetcher = respond();
+  await requestAI({ ...entry(), mode }, { ...defaultSettings, memoryDays }, 'key', action as AIAction, undefined,
+    [{ date: '2026-11-22', title: 'PRIVATE HISTORY', summary: 'PRIVATE SUMMARY' }]);
+  const request = fetcher.mock.calls[0][1].body;
+  expect(request).not.toContain('archived_context');
+  expect(request).not.toContain('PRIVATE');
+});
 it.each([['bad json', 'chat'], [JSON.stringify({ ...answer, question: '' }), 'chat'], [JSON.stringify({ ...answer, summary: '' }), 'archive']])('rejects malformed results %s', async (content, action) => {
   respond(content);
   await expect(requestAI(entry(), defaultSettings, 'key', action as 'chat' | 'archive')).rejects.toThrow(/格式/);
@@ -39,6 +63,24 @@ it.each([['bad json', 'chat'], [JSON.stringify({ ...answer, question: '' }), 'ch
 it('rejects truncated output', async () => {
   respond(JSON.stringify(answer), 200, 'length');
   await expect(requestAI(entry(), defaultSettings, 'key', 'chat')).rejects.toThrow(/截断/);
+});
+it.each([
+  { title: 'A visit to 西递' },
+  { summary: 'Xidi was a good example of 徽派建筑.' },
+  { summary: 'I saw 𠀀 on the sign.' },
+  { summary: 'I enjoyed Huizhou-style architecture。' },
+  { title: 'A quiet day：a walk' },
+])('rejects mixed-language archive output %j without automatic retry', async (fields) => {
+  const fetcher = respond(JSON.stringify({ ...answer, ...fields }));
+  await expect(requestAI(entry(), defaultSettings, 'key', 'archive')).rejects.toThrow(/未完成归档.*原文已保留.*手动重试/);
+  expect(fetcher).toHaveBeenCalledTimes(1);
+});
+it.each(['deepseek', 'minimax'] as const)('accepts English archive output with cultural names and English punctuation for %s', async (provider) => {
+  const archive = { ...answer, title: 'Xidi and Xiuli: A Festive Night', summary: 'Xidi’s Huizhou-style architecture impressed me — Xiuli felt like Chinese New Year.' };
+  const fetcher = respond(JSON.stringify(archive));
+  expect(await requestAI(entry(), { ...defaultSettings, provider }, 'key', 'archive')).toEqual(archive);
+  const body = JSON.parse(fetcher.mock.calls[0][1].body);
+  expect(body.messages[0].content).toContain('Archive title and summary must be entirely in English');
 });
 it.each([[401, '密钥'], [402, '余额'], [429, '频繁'], [500, '服务']])('gives actionable HTTP %s errors', async (status, text) => {
   respond('', status);

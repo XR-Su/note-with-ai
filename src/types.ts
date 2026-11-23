@@ -23,8 +23,14 @@ export interface Entry {
 }
 export interface Settings {
   provider: Provider;
+  memoryDays: number;
   rememberKeys: boolean;
   keys: Record<Provider, string>;
+}
+export interface ArchivedContext {
+  date: string;
+  title: string;
+  summary: string;
 }
 export type AIAction = 'chat' | 'correct' | 'archive';
 export interface AIResult {
