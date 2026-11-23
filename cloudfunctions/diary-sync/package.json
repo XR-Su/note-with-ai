@@ -1,0 +1,7 @@
+{
+  "name": "little-days-cloud-sync",
+  "version": "1.0.0",
+  "private": true,
+  "main": "index.js",
+  "dependencies": { "@cloudbase/js-sdk": "^3.1.0" }
+}

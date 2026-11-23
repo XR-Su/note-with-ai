@@ -1,12 +1,15 @@
 import { useDeferredValue, useEffect, useRef, useState } from 'react';
-import { ArrowDownToLine, ArrowLeft, ArrowRight, BookOpen, Check, ChevronDown, CircleHelp, Clock3, Feather, History, Leaf, LoaderCircle, Menu, MessageCircle, Pencil, Plus, Search, Send, Settings2, ShieldCheck, Sparkles, Sun, Trash2, Upload, X } from 'lucide-react';
+import { ArrowDownToLine, ArrowLeft, ArrowRight, BookOpen, Check, ChevronDown, CircleHelp, Clock3, Cloud, Feather, History, Leaf, LoaderCircle, Menu, MessageCircle, Pencil, Plus, Search, Send, Settings2, ShieldCheck, Sparkles, Sun, Trash2, Upload, X } from 'lucide-react';
 import type { AIAction, Entry, Mode, Settings } from './types';
 import { archivedContext, createEntry, ENTRIES_KEY, localDate, mergeEntries, persistSettings, readEntries, readSettings, saveEntries } from './journal';
 import { providers, requestAI } from './ai';
 import SettingsDialog from './components/SettingsDialog';
+import { DiarySync, recoverSyncReplacement, SYNC_KEY } from './sync';
+import type { SyncView } from './sync';
+import { SYNC_ENDPOINT } from './sync-config';
 
 function loadInitial() {
-  try { return { entries: readEntries(localStorage), error: '', blocked: false }; }
+  try { recoverSyncReplacement(localStorage); return { entries: readEntries(localStorage), error: '', blocked: false }; }
   catch (error) { return { entries: [] as Entry[], error: (error as Error).message, blocked: true }; }
 }
 
@@ -17,6 +20,7 @@ export default function App() {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [settings, setSettings] = useState(() => readSettings());
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsTab, setSettingsTab] = useState<'keys' | 'sync'>('keys');
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [query, setQuery] = useState('');
   const search = useDeferredValue(query);
@@ -40,7 +44,15 @@ export default function App() {
   const untranslated = active?.messages.some(m => m.role === 'user' && !m.english);
   const writeBlocked = useRef(initial.blocked);
   const writeReady = useRef(!navigator.locks);
+  const storageHealthy = useRef(!initial.blocked);
   const lastSaved = useRef<string | null>(null);
+  const sync = useRef<DiarySync | null>(null);
+  const [syncView, setSyncView] = useState<SyncView>({ status: 'disabled', message: '未开启云同步', token: '', lastSyncedAt: '', backups: [] });
+  const [syncGate, setSyncGate] = useState(false);
+  const syncGateRef = useRef(false);
+  const editingRef = useRef(editing);
+  editingRef.current = editing;
+  const releaseSyncGate = () => { syncGateRef.current = false; setSyncGate(false); };
 
   useEffect(() => {
     try { lastSaved.current = localStorage.getItem(ENTRIES_KEY); } catch { writeBlocked.current = true; }
@@ -69,6 +81,7 @@ export default function App() {
           return;
         }
         writeReady.current = true;
+        void sync.current?.sync();
         await new Promise<void>(resolve => { release = resolve; });
         writeReady.current = false;
       });
@@ -80,6 +93,62 @@ export default function App() {
     return () => { cancelled = true; release?.(); };
   }, [initial.blocked]);
 
+  useEffect(() => {
+    let controller: DiarySync;
+    try {
+      controller = new DiarySync(localStorage, SYNC_ENDPOINT, {
+        read: () => entriesRef.current,
+        canWrite: () => !writeBlocked.current && writeReady.current && storageHealthy.current,
+        canReplace: () => !operation.current && !editingRef.current,
+        replace: next => {
+          operation.current?.abort();
+          operation.current = null;
+          setBusy(false); setRetry(null); setEditing(null); setAIError('');
+          entriesRef.current = next; lastSaved.current = JSON.stringify(next); setEntries(next);
+          setActiveId(current => next.some(e => e.id === current) ? current : null);
+          storageHealthy.current = true; setStorageError('');
+        },
+        changed: view => {
+          setSyncView(view);
+          if (view.status === 'backup') setNotice('云端日记已下载；覆盖前的本地内容可在设置 → 云端同步 → 覆盖前备份中恢复。');
+          if (['synced', 'backup', 'disabled'].includes(view.status)) releaseSyncGate();
+        },
+      });
+      sync.current = controller;
+      if (controller.connected && SYNC_ENDPOINT && !initial.blocked) {
+        syncGateRef.current = true; setSyncGate(true);
+        if (writeReady.current) void controller.sync();
+      }
+    } catch {
+      setSyncView(v => ({ ...v, status: 'error', message: '无法读取本机同步设置，本地内容已保留。' }));
+      return;
+    }
+    const online = () => { void controller.sync(); };
+    const visibility = () => { if (document.visibilityState === 'visible') void controller.sync(); };
+    const configChange = (event: StorageEvent) => {
+      if (event.key === SYNC_KEY || event.key === null) {
+        controller.dispose();
+        setSyncView(v => ({ ...v, status: 'error', message: '另一标签页更改了同步设置，请刷新后继续。' }));
+      }
+    };
+    window.addEventListener('online', online); window.addEventListener('offline', online);
+    window.addEventListener('storage', configChange); document.addEventListener('visibilitychange', visibility);
+    return () => {
+      controller.dispose(); sync.current = null;
+      window.removeEventListener('online', online); window.removeEventListener('offline', online);
+      window.removeEventListener('storage', configChange); document.removeEventListener('visibilitychange', visibility);
+    };
+  }, [initial.blocked]);
+  const [allowOffline, setAllowOffline] = useState(false);
+  useEffect(() => {
+    if (!syncGate) { setAllowOffline(false); return; }
+    const timeout = setTimeout(() => setAllowOffline(true), 3000);
+    return () => clearTimeout(timeout);
+  }, [syncGate]);
+  useEffect(() => {
+    if (!busy && !editing && syncView.message.startsWith('云端已有更新')) void sync.current?.sync();
+  }, [busy, editing, syncView.message]);
+
   useEffect(() => { bottom.current?.scrollIntoView?.({ behavior: 'smooth', block: 'end' }); }, [activeId, active?.messages.length, busy]);
   useEffect(() => {
     if (deleteId) deleteDialog.current?.showModal?.();
@@ -90,6 +159,7 @@ export default function App() {
     // Another tab may have newer records; do not silently overwrite them.
     const onStorage = (e: StorageEvent) => {
       if (e.key === ENTRIES_KEY || e.key === null) {
+        sync.current?.dispose();
         operation.current?.abort();
         operation.current = null;
         setBusy(false);
@@ -102,6 +172,7 @@ export default function App() {
   }, []);
 
   function commit(next: Entry[]) {
+    if (syncGateRef.current) { setNotice('正在检查云端更新，请稍后或选择继续离线编辑。'); return; }
     entriesRef.current = next;
     setEntries(next);
     if (writeBlocked.current) return;
@@ -111,11 +182,13 @@ export default function App() {
         writeBlocked.current = true;
         throw new Error('本地记录已被其他页面更改，已停止写入。请先备份当前内容，再刷新。');
       }
+      sync.current?.markDirty();
       saveEntries(localStorage, next);
+      storageHealthy.current = true;
       lastSaved.current = JSON.stringify(next);
       setStorageError('');
     }
-    catch (error) { setStorageError((error as Error).message); }
+    catch (error) { storageHealthy.current = false; setStorageError((error as Error).message); }
   }
 
   function updateEntry(id: string, transform: (e: Entry) => Entry) {
@@ -134,6 +207,7 @@ export default function App() {
   }
 
   function start(mode: Mode) {
+    if (syncGateRef.current) { setNotice('正在检查云端更新，请稍后或选择继续离线编辑。'); return; }
     if (writeBlocked.current) { setNotice('本地存储读取异常，请先备份并处理顶部提示。'); return; }
     if (!writeReady.current) { setNotice('正在准备本地存储，请稍后再试。'); return; }
     const entry = createEntry(entriesRef.current, mode);
@@ -142,6 +216,7 @@ export default function App() {
   }
 
   async function runAI(entry: Entry, action: AIAction, messageId?: string) {
+    if (syncGateRef.current) return;
     if (operation.current) return;
     if (writeBlocked.current || !writeReady.current) { setNotice('本地存储不可写，请先处理保存提示。'); return; }
     if (action === 'archive' && (entry.draft.trim() || editing || !entry.messages.some(m => m.role === 'user') || entry.messages.some(m => m.role === 'user' && !m.english))) {
@@ -232,16 +307,18 @@ export default function App() {
     <div className="search-box"><Search size={15} /><input aria-label="搜索记录" placeholder="寻找某个小日子…" value={query} onChange={e => setQuery(e.target.value)} /></div>
     <div className="history-filters">{([['all', '全部'], ['daily', '日记'], ['memory', '回忆']] as const).map(([value, label]) => <button key={value} className={filter === value ? 'active' : ''} onClick={() => setFilter(value)}>{label}</button>)}</div>
     <div className="history-list">{visibleEntries.length ? visibleEntries.map(e => <button key={e.id} className={`history-entry ${activeId === e.id ? 'active' : ''}`} onClick={() => navigate(e.id)}><span className={`entry-icon ${e.mode}`}>{e.mode === 'daily' ? <Sun size={16} /> : <History size={16} />}</span><span className="history-text"><strong>{e.title}</strong><small>{e.date.replaceAll('-', '.')}<span className={e.archived ? '' : 'in-progress'}>{e.archived ? '已归档' : '记录中'}</span></small></span></button>) : <div className="history-empty"><BookOpen size={24} strokeWidth={1.2} /><p>{query ? '没有找到这段故事' : '这里会慢慢装满你的故事'}</p><small>{query ? '试试其他关键词' : '从今天的一件小事开始吧'}</small></div>}</div>
-    <div className="sidebar-footer"><button aria-label="AI 设置" onClick={() => { setSettingsOpen(true); setSidebarOpen(false); }}><Settings2 size={17} />AI 设置<span className="model-chip">{providers[settings.provider].name}</span></button><div className="backup-buttons"><button onClick={() => exportBackup()}><ArrowDownToLine size={14} />导出备份</button><button disabled={busy} onClick={() => fileInput.current?.click()}><Upload size={14} />导入</button></div><p><ShieldCheck size={13} />只保存在这个浏览器，不自动同步</p></div>
+    <div className="sidebar-footer"><button aria-label="AI 设置" onClick={() => { setSettingsTab('keys'); setSettingsOpen(true); setSidebarOpen(false); }}><Settings2 size={17} />AI 设置<span className="model-chip">{providers[settings.provider].name}</span></button><div className="backup-buttons"><button onClick={() => exportBackup()}><ArrowDownToLine size={14} />导出备份</button><button disabled={busy} onClick={() => fileInput.current?.click()}><Upload size={14} />导入</button></div><p><ShieldCheck size={13} />{syncView.token ? '本地保存，并自动同步云端' : '只保存在这个浏览器，不自动同步'}</p></div>
   </>;
 
   return <div className="app-shell">
     <aside className={`sidebar ${sidebarOpen ? 'is-open' : ''}`} aria-label="日记侧栏"><button className="mobile-close icon-button" aria-label="关闭记录列表" onClick={() => setSidebarOpen(false)}><X size={20} /></button>{sidebar}</aside>
     {sidebarOpen && <button className="sidebar-scrim" aria-label="关闭侧栏" onClick={() => setSidebarOpen(false)} />}
     <main className="main-panel">
-      <header className="topbar"><div className="topbar-left"><button className="mobile-menu icon-button" aria-label="打开记录列表" onClick={() => setSidebarOpen(true)}><Menu size={22} /></button><span className="breadcrumb">我的小日子{active && <><span>/</span>{active.mode === 'daily' ? '当天日记' : '回忆'}</>}</span></div><div className="topbar-right"><span className={`save-status ${storageError ? 'error' : ''}`}><span />{storageError ? '保存异常' : '本地保存'}</span><button className="icon-button" aria-label="打开 AI 设置" onClick={() => setSettingsOpen(true)}><Settings2 size={18} /></button></div></header>
+      <header className="topbar"><div className="topbar-left"><button className="mobile-menu icon-button" aria-label="打开记录列表" onClick={() => setSidebarOpen(true)}><Menu size={22} /></button><span className="breadcrumb">我的小日子{active && <><span>/</span>{active.mode === 'daily' ? '当天日记' : '回忆'}</>}</span></div><div className="topbar-right"><button className={`sync-status ${syncView.status}`} aria-label={`云端同步：${syncView.message}`} title={syncView.message} onClick={() => { setSettingsTab('sync'); setSettingsOpen(true); }}>{syncView.status === 'syncing' ? <LoaderCircle size={16} className="spin" /> : <Cloud size={16} />}<span>{({ disabled: '未同步', syncing: '同步中', synced: '已同步', pending: '待上传', offline: '离线', error: '同步异常', backup: '已下载' } as const)[syncView.status]}</span></button><span className={`save-status ${storageError ? 'error' : ''}`}><span />{storageError ? '保存异常' : '本地保存'}</span><button className="icon-button" aria-label="打开 AI 设置" onClick={() => { setSettingsTab('keys'); setSettingsOpen(true); }}><Settings2 size={18} /></button></div></header>
       {storageError && <div role="alert" className="storage-alert">{storageError}<button onClick={() => exportBackup()}>导出当前内容</button><button onClick={() => exportBackup(true)}>导出原始存储</button></div>}
       {notice && <div role="status" className="notice">{notice}<button className="icon-button" aria-label="关闭提示" onClick={() => setNotice('')}><X size={15} /></button></div>}
+      {syncGate && <div className="sync-startup" role="status"><LoaderCircle className="spin" size={15} />正在检查云端日记，暂时只读。{allowOffline && <button className="text-button" onClick={releaseSyncGate}>继续离线编辑</button>}</div>}
+      <fieldset className="journal-surface" disabled={syncGate}>
       {!active ? <div className="home-content">
         <div className="date-line"><span className="little-sun"><Sun size={17} /></span>{new Date().toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' })}<span className="date-rule" /></div>
         <section className="welcome"><div className="welcome-copy"><div className="eyebrow">A LITTLE SPACE, JUST FOR YOU</div><h1>Every little day<br />has a <em>story.</em></h1><p className="welcome-subtitle">平凡的日子里，也有值得留下的瞬间。</p><p className="welcome-description">不用完美的英文，也不用特别的故事。<br />和 AI 聊聊今天，或拾起一段回忆，让生活慢慢成为文字。</p></div><div className="journal-illustration" aria-hidden="true"><div className="illustration-orbit" /><div className="floating-leaf leaf-one"><Leaf size={43} strokeWidth={1.2} /></div><div className="floating-leaf leaf-two"><Leaf size={29} strokeWidth={1.2} /></div><div className="paper back-paper" /><div className="paper front-paper"><span className="paper-date">a little note to myself</span><div className="paper-title">Today was<br />a good day.</div><div className="paper-line" /><div className="paper-line short" /><div className="paper-line" /><div className="paper-line shorter" /><span className="paper-flower">✳</span><span className="paper-footer">and that is enough.</span></div><div className="illustration-caption">ordinary moments, extraordinary you</div></div></section>
@@ -251,7 +328,7 @@ export default function App() {
         </div></section>
         <section className="how-it-works"><div className="how-label"><Sparkles size={17} /><span>让表达，轻松一点</span></div><div className="how-items"><div><span className="step-number">01</span><div><strong>像聊天一样记录</strong><p>一次一个问题，跟随你的节奏</p></div></div><div><span className="step-number">02</span><div><strong>中文英文，都可以</strong><p>原文下方，呈现自然的英文表达</p></div></div><div><span className="step-number">03</span><div><strong>故事，值得收藏</strong><p>生成英文总结，随时回来接着聊</p></div></div></div></section>
         {!settings.keys[settings.provider] && <button className="setup-banner" onClick={() => setSettingsOpen(true)}><span><CircleHelp size={19} /><span>第一次来？添加你自己的 API 密钥，就能开始和 AI 聊天。</span></span><strong>设置 AI<ArrowRight size={15} /></strong></button>}
-        <footer className="home-footer"><Feather size={14} /><span>Not every day is special. But every day is yours.</span><span className="footer-local"><ShieldCheck size={13} />你的故事，只保存在你的浏览器</span></footer>
+        <footer className="home-footer"><Feather size={14} /><span>Not every day is special. But every day is yours.</span><span className="footer-local"><ShieldCheck size={13} />{syncView.token ? '本地保存 · 云端同步' : '你的故事，只保存在你的浏览器'}</span></footer>
       </div> : <div className="entry-page">
         <div className="entry-heading"><button className="back-button" onClick={() => navigate(null)}><ArrowLeft size={15} />返回</button><div className="entry-meta"><span className={`entry-tag ${active.mode}`}>{active.mode === 'daily' ? <Sun size={14} /> : <History size={14} />}{active.mode === 'daily' ? '当天日记' : '一段回忆'}</span><span>{active.date.replaceAll('-', '.')}</span><span>{active.archived ? '已归档' : '记录中'}</span></div><div className="entry-title-row"><input aria-label="记录标题" className="entry-title" value={active.title} disabled={busy} maxLength={120} onChange={e => updateEntry(active.id, current => ({ ...current, title: e.target.value }))} /><button className="icon-button delete-button" aria-label="删除整篇记录" disabled={busy} onClick={() => setDeleteId(active.id)}><Trash2 size={18} /></button></div><p className="entry-intro">{active.mode === 'daily' ? '把今天的片刻，说给未来的自己听。' : '让记忆里的那个瞬间，再清晰一点。'}<span><MessageCircle size={13} />{userCount} 次分享</span></p></div>
         {active.archived && <section className="summary-card"><div className="summary-label"><BookOpen size={17} />YOUR STORY, IN ENGLISH<span><Check size={13} />已归档</span></div><h2>{active.title}</h2><p>{active.summary}</p><button className="text-button" onClick={() => updateEntry(active.id, e => ({ ...e, archived: false, summary: '' }))}>继续这段对话<ArrowRight size={16} /></button></section>}
@@ -261,9 +338,10 @@ export default function App() {
         <div ref={bottom} />
         {!active.archived && <div className="composer-section"><div className="composer"><textarea aria-label="你的回答" placeholder="今天发生了什么？中文、英文都可以…" value={active.draft} disabled={busy || !!editing || !!pendingAnswer || !!untranslated} maxLength={10000} onChange={e => updateEntry(active.id, current => ({ ...current, draft: e.target.value }))} onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !e.nativeEvent.isComposing) { e.preventDefault(); send(); } }} /><div className="composer-bottom"><span><Leaf size={13} />不用完美，真实就好</span><button className="send-button" aria-label="发送回答" disabled={busy || !active.draft.trim() || !!pendingAnswer || !!untranslated || !!editing} onClick={send}>{busy ? <LoaderCircle size={16} className="spin" /> : <Send size={16} />}<span>发送</span></button></div></div><div className="composer-footer"><span><ShieldCheck size={12} />{storageError ? '保存异常，请先备份' : '原文与草稿自动本地保存'}<span className="keyboard-hint"> · Ctrl / ⌘ + Enter 发送</span></span><button className="archive-button" disabled={busy || !userCount || !!untranslated || !!editing || !!active.draft.trim()} title={active.draft.trim() ? '请先发送或清空当前草稿' : '生成英文总结并归档'} onClick={() => void runAI(active, 'archive')}><Check size={14} />结束并归档</button></div><button className="model-selector" onClick={() => setSettingsOpen(true)}><span className="model-dot" />{providers[settings.provider].name}<ChevronDown size={12} /><span>只发送当前这一篇对话</span></button></div>}
       </div>}
+      </fieldset>
     </main>
     <input ref={fileInput} type="file" accept=".json,application/json" hidden onChange={e => void importBackup(e.target.files?.[0])} />
-    {settingsOpen && <SettingsDialog settings={settings} onSave={changeSettings} onClose={() => setSettingsOpen(false)} />}
+    {settingsOpen && <SettingsDialog settings={settings} onSave={changeSettings} onClose={() => { setSettingsOpen(false); setSettingsTab('keys'); }} syncController={sync.current} syncView={syncView} initialTab={settingsTab} />}
     <dialog ref={deleteDialog} className="delete-dialog" open={!!deleteId && !HTMLDialogElement.prototype.showModal} aria-labelledby="delete-title" onCancel={() => setDeleteId(null)}><h2 id="delete-title">删除这段故事？</h2><p>整篇对话和英文总结都会从浏览器中删除，无法撤销。你可以先导出备份。</p><div><button className="secondary" onClick={() => setDeleteId(null)}>再想想</button><button className="danger" onClick={() => { commit(entriesRef.current.filter(e => e.id !== deleteId)); if (activeId === deleteId) navigate(null); setDeleteId(null); }}>确认删除</button></div></dialog>
   </div>;
 }

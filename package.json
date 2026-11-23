@@ -6,20 +6,26 @@
   "scripts": {
     "dev": "vite --host 0.0.0.0",
     "build": "tsc -b && vite build",
+    "build:sync": "node scripts/build-sync.mjs",
+    "dev:sync": "node scripts/dev-sync.mjs",
     "preview": "vite preview --host 0.0.0.0",
     "test": "vitest run"
   },
   "dependencies": {
+    "jsqr": "^1.4.0",
     "lucide-react": "^0.468.0",
+    "qrcode": "^1.5.4",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },
   "devDependencies": {
     "@testing-library/react": "^16.3.0",
     "@types/node": "^24.0.0",
+    "@types/qrcode": "^1.5.6",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^4.5.0",
+    "esbuild": "^0.25.12",
     "jsdom": "^26.0.0",
     "typescript": "~5.8.3",
     "vite": "^6.3.0",

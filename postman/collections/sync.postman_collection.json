@@ -1,0 +1,440 @@
+{
+  "info": {
+    "name": "Little Days snapshot sync contract",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "Derived from docs/sync-api.openapi.yaml. Local-only synthetic empty diaries and temporary test credentials; no user diary or provider keys. Run against local real handler or an explicitly selected cloud test endpoint."
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://127.0.0.1:8787"
+    }
+  ],
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "const uuid=()=>pm.variables.replaceIn('{{$randomUUID}}');",
+          "if (!pm.variables.get('syncToken')) {",
+          " pm.variables.set('syncToken','ld1_'+(uuid()+uuid()).replace(/-/g,'').slice(0,43));",
+          " pm.variables.set('unknownToken','ld1_'+(uuid()+uuid()).replace(/-/g,'').slice(0,43));",
+          " for (const name of ['createOp','pushOp','staleOp','invalidOp']) pm.variables.set(name,uuid());",
+          "}"
+        ]
+      }
+    }
+  ],
+  "item": [
+    {
+      "name": "Create private empty space",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{syncToken}}"
+          }
+        ],
+        "url": "{{baseUrl}}/diary-sync",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"action\": \"create\", \"expectedVersion\": 0, \"operationId\": \"{{createOp}}\", \"snapshot\": {\"version\": 1, \"entries\": []}}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+              "pm.test('Version 1, diary-only payload', () => { const r=pm.response.json(); pm.expect(r.version).to.eql(1); pm.expect(r.snapshot).to.eql({version:1,entries:[]}); pm.expect(r).not.to.have.property('token'); });"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Read shared cloud file",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{syncToken}}"
+          }
+        ],
+        "url": "{{baseUrl}}/diary-sync",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"action\": \"pull\"}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+              "pm.test('Reads current version',()=>pm.expect(pm.response.json().version).to.eql(1));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Upload expected version",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{syncToken}}"
+          }
+        ],
+        "url": "{{baseUrl}}/diary-sync",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"action\": \"push\", \"expectedVersion\": 1, \"operationId\": \"{{pushOp}}\", \"snapshot\": {\"version\": 1, \"entries\": []}}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+              "pm.test('Committed version 2',()=>pm.expect(pm.response.json().version).to.eql(2));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Retry committed write idempotently",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{syncToken}}"
+          }
+        ],
+        "url": "{{baseUrl}}/diary-sync",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"action\": \"push\", \"expectedVersion\": 1, \"operationId\": \"{{pushOp}}\", \"snapshot\": {\"version\": 1, \"entries\": []}}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+              "pm.test('Retry keeps version 2',()=>pm.expect(pm.response.json().version).to.eql(2));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Reject stale device upload",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{syncToken}}"
+          }
+        ],
+        "url": "{{baseUrl}}/diary-sync",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"action\": \"push\", \"expectedVersion\": 1, \"operationId\": \"{{staleOp}}\", \"snapshot\": {\"version\": 1, \"entries\": []}}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 409', () => pm.response.to.have.status(409));",
+              "pm.test('Version conflict',()=>pm.expect(pm.response.json().error).to.eql('version_conflict'));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Verify conflict kept cloud file",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{syncToken}}"
+          }
+        ],
+        "url": "{{baseUrl}}/diary-sync",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"action\": \"pull\"}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+              "pm.test('Cloud not overwritten',()=>pm.expect(pm.response.json().version).to.eql(2));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Reject different space credential",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{unknownToken}}"
+          }
+        ],
+        "url": "{{baseUrl}}/diary-sync",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"action\": \"pull\"}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 404', () => pm.response.to.have.status(404));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Reject malformed credential",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer invalid-token"
+          }
+        ],
+        "url": "{{baseUrl}}/diary-sync",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"action\": \"pull\"}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 401', () => pm.response.to.have.status(401));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Reject unsupported snapshot schema",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{syncToken}}"
+          }
+        ],
+        "url": "{{baseUrl}}/diary-sync",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"action\": \"push\", \"expectedVersion\": 2, \"operationId\": \"{{invalidOp}}\", \"snapshot\": {\"version\": 99, \"entries\": []}}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 400', () => pm.response.to.have.status(400));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Allow Pages preflight",
+      "request": {
+        "method": "OPTIONS",
+        "header": [
+          {
+            "key": "Origin",
+            "value": "https://xr-su.github.io"
+          },
+          {
+            "key": "Access-Control-Request-Headers",
+            "value": "authorization,content-type"
+          }
+        ],
+        "url": "{{baseUrl}}/diary-sync"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 204', () => pm.response.to.have.status(204));",
+              "pm.test('Authorization allowed',()=>pm.expect(pm.response.headers.get('Access-Control-Allow-Headers')).to.include('Authorization'));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Reject foreign browser origin",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{syncToken}}"
+          },
+          {
+            "key": "Origin",
+            "value": "https://not-allowed.example"
+          }
+        ],
+        "url": "{{baseUrl}}/diary-sync",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"action\": \"pull\"}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 403', () => pm.response.to.have.status(403));"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

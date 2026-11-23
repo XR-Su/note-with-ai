@@ -1,0 +1,105 @@
+openapi: 3.0.3
+info:
+  title: Little Days snapshot sync
+  version: 1.0.0
+  description: Private whole-file snapshots. Browser-generated immutable random credentials are not cloud administrator keys. No account login. This spec is the contract source; the Postman collection adds behavioral assertions.
+servers:
+  - url: http://127.0.0.1:8787
+    description: Local contract server with temporary in-memory storage
+paths:
+  /diary-sync:
+    get:
+      operationId: syncHealth
+      responses:
+        '200':
+          description: Public health response; contains no diary data.
+    options:
+      operationId: syncPreflight
+      responses:
+        '204':
+          description: Allowed origins may send Authorization and Content-Type.
+        '403':
+          description: Browser origin not allowed.
+    post:
+      operationId: syncSnapshot
+      security:
+        - syncCredential: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action]
+              properties:
+                action:
+                  type: string
+                  enum: [create, pull, push]
+                expectedVersion:
+                  type: integer
+                  minimum: 0
+                  description: Required for writes; zero for create, current head version for push.
+                operationId:
+                  type: string
+                  format: uuid
+                  description: Required for writes. Retry the same body/ID after uncertain outcomes; a repeated current-head operation does not increment the version.
+                snapshot:
+                  type: object
+                  required: [version, entries]
+                  description: Required for writes. Canonical diary fields only, at most 4 MB; excludes settings, API keys, sync credentials and prior local backups.
+                  properties:
+                    version:
+                      type: integer
+                      enum: [1]
+                    entries:
+                      type: array
+                      items:
+                        type: object
+                        required: [id, mode, date, title, createdAt, updatedAt, archived, summary, draft, messages]
+                        properties:
+                          id: { type: string, minLength: 1 }
+                          mode: { type: string, enum: [daily, memory] }
+                          date: { type: string, format: date }
+                          title: { type: string }
+                          createdAt: { type: string, format: date-time }
+                          updatedAt: { type: string, format: date-time }
+                          archived: { type: boolean }
+                          summary: { type: string }
+                          draft: { type: string }
+                          messages:
+                            type: array
+                            items:
+                              type: object
+                              required: [id, role, content]
+                              properties:
+                                id: { type: string, minLength: 1 }
+                                role: { type: string, enum: [user, assistant] }
+                                content: { type: string }
+                                english: { type: string }
+                                explanation: { type: string }
+                                chinese: { type: string }
+                                translation: { type: boolean }
+      responses:
+        '200':
+          description: Canonical snapshot and positive monotonically increasing cloud version; writes have been committed.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [version, snapshot]
+                properties:
+                  version: { type: integer, minimum: 1 }
+                  snapshot: { type: object }
+        '400': { description: Invalid action, unsupported/invalid snapshot, or operation ID reused with different content. }
+        '401': { description: Missing or malformed credential. }
+        '403': { description: Browser origin not allowed. }
+        '404': { description: Unknown credential/space. Cannot initialize space by pulling or pushing. }
+        '409': { description: Token collision or outdated expectedVersion. Pull current head, preserve local backup, then replace; do not force-write over it. }
+        '413': { description: Request too large; local content must be retained. }
+        '503': { description: Storage or service failure. Write outcome may be uncertain; keep local pending operation for safe retry. }
+components:
+  securitySchemes:
+    syncCredential:
+      type: http
+      scheme: bearer
+      bearerFormat: ld1_ plus 43 base64url characters representing 32 random bytes

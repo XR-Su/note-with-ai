@@ -1,0 +1,12 @@
+import { build } from 'esbuild';
+import { spawn } from 'node:child_process';
+import { mkdtemp } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+const folder = await mkdtemp(join(tmpdir(), 'little-days-sync-'));
+const outfile = join(folder, 'local-sync.cjs');
+await build({ entryPoints: ['cloud/local-server.ts'], bundle: true, platform: 'node', target: 'node18', format: 'cjs', outfile });
+const child = spawn(process.execPath, [outfile], { stdio: 'inherit' });
+process.on('SIGINT', () => child.kill('SIGINT'));
+process.on('SIGTERM', () => child.kill('SIGTERM'));
+child.on('exit', code => { process.exitCode = code || 0; });

@@ -40,7 +40,7 @@ export function createEntry(entries: Entry[], mode: Mode, now = new Date()): Ent
   };
 }
 
-function validateEntries(value: unknown): Entry[] {
+export function validateEntries(value: unknown): Entry[] {
   if (!Array.isArray(value)) throw new Error('日记文件格式无效。');
   const ids = new Set<string>();
   const days = new Set<string>();
