@@ -22,6 +22,59 @@ it('creates a daily entry with a bilingual opening and autosaved draft', () => {
   fireEvent.change(screen.getByRole('textbox', { name: '你的回答' }), { target: { value: 'Today was lovely.' } });
   expect(localStorage.getItem('little-days.entries.v1')).toContain('Today was lovely.');
 });
+it('reveals the conversation header on upward scroll without reacting to small direction changes', () => {
+  vi.stubGlobal('scrollY', 0);
+  const { container } = render(<App />);
+  fireEvent.click(screen.getByRole('button', { name: '记录今天' }));
+  const header = container.querySelector('.conversation-header') as HTMLDivElement;
+  const scrollTo = (y: number) => {
+    vi.stubGlobal('scrollY', y);
+    fireEvent.scroll(window);
+  };
+  scrollTo(20);
+  expect(header.classList.contains('is-hidden')).toBe(false);
+  scrollTo(24);
+  expect(header.classList.contains('is-hidden')).toBe(true);
+  expect(header.hasAttribute('inert')).toBe(true);
+  scrollTo(100);
+  scrollTo(94);
+  expect(header.classList.contains('is-hidden')).toBe(true);
+  scrollTo(88);
+  expect(header.classList.contains('is-hidden')).toBe(false);
+  expect(header.hasAttribute('inert')).toBe(false);
+  scrollTo(110);
+  expect(header.classList.contains('is-hidden')).toBe(false);
+  scrollTo(112);
+  expect(header.classList.contains('is-hidden')).toBe(true);
+  scrollTo(5);
+  expect(header.classList.contains('is-hidden')).toBe(false);
+});
+it('restores the header when switching records and leaves the homepage outside scroll behavior', () => {
+  vi.stubGlobal('scrollY', 0);
+  const { container } = render(<App />);
+  fireEvent.click(screen.getByRole('button', { name: '记录今天' }));
+  vi.stubGlobal('scrollY', 100);
+  fireEvent.scroll(window);
+  expect(container.querySelector('.conversation-header.is-hidden')).not.toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: /拾起一段回忆/ }));
+  expect(container.querySelector('.conversation-header.is-hidden')).toBeNull();
+  vi.stubGlobal('scrollY', 150);
+  fireEvent.scroll(window);
+  expect(container.querySelector('.conversation-header.is-hidden')).not.toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '小日子首页' }));
+  vi.stubGlobal('scrollY', 200);
+  fireEvent.scroll(window);
+  expect(container.querySelector('.conversation-header')).toBeNull();
+});
+it('keeps focused header controls visible during scrolling', () => {
+  vi.stubGlobal('scrollY', 0);
+  const { container } = render(<App />);
+  fireEvent.click(screen.getByRole('button', { name: '记录今天' }));
+  screen.getByRole('textbox', { name: '记录标题' }).focus();
+  vi.stubGlobal('scrollY', 100);
+  fireEvent.scroll(window);
+  expect(container.querySelector('.conversation-header.is-hidden')).toBeNull();
+});
 it('opens API settings with key opt-in disabled', () => {
   render(<App />);
   fireEvent.click(screen.getByRole('button', { name: 'AI 设置' }));

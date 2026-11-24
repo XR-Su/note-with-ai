@@ -18,6 +18,8 @@ export default function App() {
   const [settings, setSettings] = useState(() => readSettings());
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [headerVisible, setHeaderVisible] = useState(true);
+  const conversationHeader = useRef<HTMLDivElement>(null);
   const [query, setQuery] = useState('');
   const search = useDeferredValue(query);
   const [filter, setFilter] = useState<'all' | Mode>('all');
@@ -79,6 +81,39 @@ export default function App() {
     });
     return () => { cancelled = true; release?.(); };
   }, [initial.blocked]);
+
+  useEffect(() => {
+    setHeaderVisible(true);
+    if (!active?.id) return;
+    let previousY = Math.max(0, window.scrollY);
+    let travel = 0;
+    const onScroll = () => {
+      const maxY = document.documentElement.scrollHeight - window.innerHeight;
+      const y = Math.max(0, maxY > 0 ? Math.min(window.scrollY, maxY) : window.scrollY);
+      const delta = y - previousY;
+      previousY = y;
+      if (y <= 12) {
+        travel = 0;
+        setHeaderVisible(true);
+        return;
+      }
+      if (!delta) return;
+      travel = Math.sign(delta) === Math.sign(travel) ? travel + delta : delta;
+      // Keep focused header controls reachable while typing or using the keyboard.
+      if (conversationHeader.current?.contains(document.activeElement)) {
+        travel = 0;
+        setHeaderVisible(true);
+      } else if (travel >= 24) {
+        setHeaderVisible(false);
+        travel = 0;
+      } else if (travel <= -12) {
+        setHeaderVisible(true);
+        travel = 0;
+      }
+    };
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
+  }, [active?.id]);
 
   useEffect(() => { bottom.current?.scrollIntoView?.({ behavior: 'smooth', block: 'end' }); }, [activeId, active?.messages.length, busy]);
   useEffect(() => {
@@ -239,7 +274,10 @@ export default function App() {
     <aside className={`sidebar ${sidebarOpen ? 'is-open' : ''}`} aria-label="日记侧栏"><button className="mobile-close icon-button" aria-label="关闭记录列表" onClick={() => setSidebarOpen(false)}><X size={20} /></button>{sidebar}</aside>
     {sidebarOpen && <button className="sidebar-scrim" aria-label="关闭侧栏" onClick={() => setSidebarOpen(false)} />}
     <main className="main-panel">
-      <header className="topbar"><div className="topbar-left"><button className="mobile-menu icon-button" aria-label="打开记录列表" onClick={() => setSidebarOpen(true)}><Menu size={22} /></button><span className="breadcrumb">我的小日子{active && <><span>/</span>{active.mode === 'daily' ? '当天日记' : '回忆'}</>}</span></div><div className="topbar-right"><span className={`save-status ${storageError ? 'error' : ''}`}><span />{storageError ? '保存异常' : '本地保存'}</span><button className="icon-button" aria-label="打开 AI 设置" onClick={() => setSettingsOpen(true)}><Settings2 size={18} /></button></div></header>
+      <div ref={conversationHeader} className={active ? `conversation-header${headerVisible ? '' : ' is-hidden'}` : undefined} inert={!!active && !headerVisible}>
+        <header className="topbar"><div className="topbar-left"><button className="mobile-menu icon-button" aria-label="打开记录列表" onClick={() => setSidebarOpen(true)}><Menu size={22} /></button><span className="breadcrumb">我的小日子{active && <><span>/</span>{active.mode === 'daily' ? '当天日记' : '回忆'}</>}</span></div><div className="topbar-right"><span className={`save-status ${storageError ? 'error' : ''}`}><span />{storageError ? '保存异常' : '本地保存'}</span><button className="icon-button" aria-label="打开 AI 设置" onClick={() => setSettingsOpen(true)}><Settings2 size={18} /></button></div></header>
+        {active && <div className="entry-header-content"><div className="entry-heading"><button className="back-button" onClick={() => navigate(null)}><ArrowLeft size={15} />返回</button><div className="entry-meta"><span className={`entry-tag ${active.mode}`}>{active.mode === 'daily' ? <Sun size={14} /> : <History size={14} />}{active.mode === 'daily' ? '当天日记' : '一段回忆'}</span><span>{active.date.replaceAll('-', '.')}</span><span>{active.archived ? '已归档' : '记录中'}</span></div><div className="entry-title-row"><input aria-label="记录标题" className="entry-title" value={active.title} disabled={busy} maxLength={120} onChange={e => updateEntry(active.id, current => ({ ...current, title: e.target.value }))} /><button className="icon-button delete-button" aria-label="删除整篇记录" disabled={busy} onClick={() => setDeleteId(active.id)}><Trash2 size={18} /></button></div><p className="entry-intro">{active.mode === 'daily' ? '把今天的片刻，说给未来的自己听。' : '让记忆里的那个瞬间，再清晰一点。'}<span><MessageCircle size={13} />{userCount} 次分享</span></p></div></div>}
+      </div>
       {storageError && <div role="alert" className="storage-alert">{storageError}<button onClick={() => exportBackup()}>导出当前内容</button><button onClick={() => exportBackup(true)}>导出原始存储</button></div>}
       {notice && <div role="status" className="notice">{notice}<button className="icon-button" aria-label="关闭提示" onClick={() => setNotice('')}><X size={15} /></button></div>}
       {!active ? <div className="home-content">
@@ -252,8 +290,7 @@ export default function App() {
         <section className="how-it-works"><div className="how-label"><Sparkles size={17} /><span>让表达，轻松一点</span></div><div className="how-items"><div><span className="step-number">01</span><div><strong>像聊天一样记录</strong><p>一次一个问题，跟随你的节奏</p></div></div><div><span className="step-number">02</span><div><strong>中文英文，都可以</strong><p>原文下方，呈现自然的英文表达</p></div></div><div><span className="step-number">03</span><div><strong>故事，值得收藏</strong><p>生成英文总结，随时回来接着聊</p></div></div></div></section>
         {!settings.keys[settings.provider] && <button className="setup-banner" onClick={() => setSettingsOpen(true)}><span><CircleHelp size={19} /><span>第一次来？添加你自己的 API 密钥，就能开始和 AI 聊天。</span></span><strong>设置 AI<ArrowRight size={15} /></strong></button>}
         <footer className="home-footer"><Feather size={14} /><span>Not every day is special. But every day is yours.</span><span className="footer-local"><ShieldCheck size={13} />你的故事，只保存在你的浏览器</span></footer>
-      </div> : <div className="entry-page">
-        <div className="entry-heading"><button className="back-button" onClick={() => navigate(null)}><ArrowLeft size={15} />返回</button><div className="entry-meta"><span className={`entry-tag ${active.mode}`}>{active.mode === 'daily' ? <Sun size={14} /> : <History size={14} />}{active.mode === 'daily' ? '当天日记' : '一段回忆'}</span><span>{active.date.replaceAll('-', '.')}</span><span>{active.archived ? '已归档' : '记录中'}</span></div><div className="entry-title-row"><input aria-label="记录标题" className="entry-title" value={active.title} disabled={busy} maxLength={120} onChange={e => updateEntry(active.id, current => ({ ...current, title: e.target.value }))} /><button className="icon-button delete-button" aria-label="删除整篇记录" disabled={busy} onClick={() => setDeleteId(active.id)}><Trash2 size={18} /></button></div><p className="entry-intro">{active.mode === 'daily' ? '把今天的片刻，说给未来的自己听。' : '让记忆里的那个瞬间，再清晰一点。'}<span><MessageCircle size={13} />{userCount} 次分享</span></p></div>
+      </div> : <div className="entry-page entry-body">
         {active.archived && <section className="summary-card"><div className="summary-label"><BookOpen size={17} />YOUR STORY, IN ENGLISH<span><Check size={13} />已归档</span></div><h2>{active.title}</h2><p>{active.summary}</p><button className="text-button" onClick={() => updateEntry(active.id, e => ({ ...e, archived: false, summary: '' }))}>继续这段对话<ArrowRight size={16} /></button></section>}
         <div className="conversation" aria-label="日记对话">{active.messages.map(m => m.role === 'assistant' ? <article className="assistant-message" key={m.id}><span className="assistant-avatar"><Sparkles size={17} /></span><div><div className="message-label">LITTLE DAYS<span>你的记录搭子</span></div><p className="assistant-english">{m.content}</p>{m.chinese && <p className="assistant-chinese">{m.chinese}</p>}</div></article> : <article className="user-message" key={m.id}><div className="message-label">你的分享<button disabled={busy || !!editing} className="edit-message" aria-label="修改这条回答" onClick={() => { setEditing({ id: m.id, text: m.content }); setAIError(''); }}><Pencil size={13} />修改</button></div>{editing?.id === m.id ? <div className="edit-form"><textarea aria-label="修改回答" value={editing.text} onChange={e => setEditing({ ...editing, text: e.target.value })} /><p className="small muted">保存后重新生成英文表达，并清除旧总结；后续对话会保留。</p><button className="primary small-button" onClick={saveEdit} disabled={!editing.text.trim()}>保存并重新纠错</button><button className="text-button" onClick={() => setEditing(null)}>取消</button></div> : <><p className="original-text">{m.content}</p>{m.english ? <div className="english-version"><div className="english-label"><Sparkles size={13} />{m.translation ? '用英文这样表达' : '更自然的英文表达'}</div><p>{m.english}</p>{m.explanation && <div className="correction-note"><span>表达小贴士</span>{m.explanation}</div>}</div> : <div className="pending-translation"><Clock3 size={13} />英文表达待生成{!busy && <button className="text-button" onClick={() => void runAI(active, pendingAnswer && m.id === active.messages.at(-1)?.id ? 'chat' : 'correct', m.id)}>生成英文表达</button>}</div>}</>}</article>)}</div>
         {busy && <div className="thinking" role="status"><LoaderCircle size={16} className="spin" />正在认真读你的故事…<button className="text-button" onClick={() => { operation.current?.abort(); operation.current = null; setBusy(false); setAIError('已取消请求，原文已保留。'); }}>取消</button></div>}
