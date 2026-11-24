@@ -27,6 +27,9 @@ it('reveals the conversation header on upward scroll without reacting to small d
   const { container } = render(<App />);
   fireEvent.click(screen.getByRole('button', { name: '记录今天' }));
   const header = container.querySelector('.conversation-header') as HTMLDivElement;
+  const title = screen.getByRole('textbox', { name: '记录标题' });
+  expect(header.contains(title)).toBe(false);
+  expect(title.closest('.entry-page')).not.toBeNull();
   const scrollTo = (y: number) => {
     vi.stubGlobal('scrollY', y);
     fireEvent.scroll(window);
@@ -36,6 +39,8 @@ it('reveals the conversation header on upward scroll without reacting to small d
   scrollTo(24);
   expect(header.classList.contains('is-hidden')).toBe(true);
   expect(header.hasAttribute('inert')).toBe(true);
+  expect(title.closest('[inert]')).toBeNull();
+  expect(screen.getByRole('button', { name: '返回' })).toBeDefined();
   scrollTo(100);
   scrollTo(94);
   expect(header.classList.contains('is-hidden')).toBe(true);
@@ -70,7 +75,7 @@ it('keeps focused header controls visible during scrolling', () => {
   vi.stubGlobal('scrollY', 0);
   const { container } = render(<App />);
   fireEvent.click(screen.getByRole('button', { name: '记录今天' }));
-  screen.getByRole('textbox', { name: '记录标题' }).focus();
+  screen.getByRole('button', { name: '打开 AI 设置' }).focus();
   vi.stubGlobal('scrollY', 100);
   fireEvent.scroll(window);
   expect(container.querySelector('.conversation-header.is-hidden')).toBeNull();
