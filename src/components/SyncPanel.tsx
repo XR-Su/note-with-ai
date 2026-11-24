@@ -68,11 +68,11 @@ export default function SyncPanel({ controller, view }: { controller: DiarySync 
       }, 400);
     } catch (e) { stopCamera(); setError((e as Error).message); }
   }
-  const disabled = working || view.status === 'syncing';
+  const disabled = working || view.status === 'syncing' || !SYNC_ENDPOINT;
   return <section className="sync-panel" aria-label="云端同步设置">
     <p className="small">无需账号。创建一个同步空间，在其他设备粘贴或扫描同一口令，就能自动同步完整日记。</p>
     <div role="status" className={`sync-detail ${view.status}`}><strong>{view.message}</strong>{view.lastSyncedAt && <p>上次成功同步：{new Date(view.lastSyncedAt).toLocaleString('zh-CN')}</p>}</div>
-    {!SYNC_ENDPOINT && <p className="small">云同步服务尚未配置，日记继续本地保存。</p>}
+    {!SYNC_ENDPOINT && <p className="small">云同步已暂停，日记继续本地保存。已有口令和备份仍保留。</p>}
     {view.token ? <>
       <div className="sync-actions"><button className="secondary" onClick={() => setShow(!show)}>{show ? '隐藏口令与二维码' : '查看口令与二维码'}</button><button className="secondary" onClick={() => void action(() => controller?.sync())} disabled={disabled}><RefreshCw size={15} />立即同步</button></div>
       {show && <div className="sync-passphrase"><label htmlFor="sync-token">系统生成的固定同步口令</label><textarea id="sync-token" readOnly value={view.token} autoComplete="off" spellCheck={false} /><button className="text-button" onClick={() => void action(async () => { await navigator.clipboard.writeText(view.token); setCopied(true); })}>{copied ? <Check size={14} /> : <Copy size={14} />}{copied ? '已复制' : '复制口令'}</button>{qr && <img src={qr} width="220" height="220" alt="连接此同步空间的二维码" />}</div>}

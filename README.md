@@ -78,7 +78,7 @@ DeepSeek 关闭思考，使用 JSON 模式；MiniMax 使用低思考档位，返
 
 页面仍由 GitHub Pages 托管，CloudBase 只负责同步授权、版本检查与私有文件。快照文件在云函数内加密后存储，授权请求时云函数能解密；不承诺云服务运营者无法读取。云同步发送完整日记，与 AI 请求的记忆设置是不同的数据边界。
 
-部署入口、接口约定和验证方式见 [后端部署](cloud/README.md)、[同步设计](docs/cloud-snapshot-sync.md) 与 [OpenAPI](docs/sync-api.openapi.yaml)。当前代码默认连接已部署的腾讯云上海测试接口，可通过 `VITE_SYNC_URL` 覆盖地址。默认网关域名仅用于测试；现有体验环境显示有效期至 2026-12-12，服务端测试 API Key 有效期至 2026-12-23。正式运行需另行确认域名与套餐。不要将腾讯云管理密钥配置成任何 `VITE_` 变量。
+部署入口、接口约定和验证方式见 [后端部署](cloud/README.md)、[同步设计](docs/cloud-snapshot-sync.md) 与 [OpenAPI](docs/sync-api.openapi.yaml)。2026-11-24 已暂停同步：腾讯云上海测试路由 `/diary-sync` 的公网访问已关闭，代码默认不配置同步地址，已有本地口令与备份保留。恢复时需先重新开放云端路由，再显式设置 `VITE_SYNC_URL`。默认网关域名仅用于测试；2026-11-23 控制台显示体验套餐有效期至 2027-05-12，当前资源配额周期结束于 2026-12-12，服务端测试 API Key 有效期至 2026-12-23。正式运行需另行确认域名与套餐。不要将腾讯云管理密钥配置成任何 `VITE_` 变量。
 
 本地接口验证：`npm run dev:sync` 启动只监听本机、使用临时内存存储的真实同步处理器；运行 `postman collection run postman/collections/sync.postman_collection.json --no-report-events`。此模式不验证腾讯云 SDK、真实大陆访问或长期云端存储。
 

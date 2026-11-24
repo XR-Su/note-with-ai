@@ -20,6 +20,20 @@ function setup(remoteEntries?: Entry[], version = 1) {
     replace: value => { entries = value; }, changed: value => { view = value; } }, fetcher);
   return { service, fetcher, entries: () => entries, view: () => view };
 }
+it('preserves credentials and local changes without requests while sync is paused', async () => {
+  vi.useFakeTimers();
+  const entries = [createEntry([], 'daily')]; saveEntries(localStorage, entries);
+  localStorage.setItem(SYNC_KEY, JSON.stringify({ token: TOKEN, version: 1, dirty: false, lastSyncedAt: '' }));
+  const fetcher = vi.fn(); const replace = vi.fn(); let view!: SyncView;
+  const service = new DiarySync(localStorage, '', { read: () => entries, canWrite: () => true, canReplace: () => true, replace, changed: value => { view = value; } }, fetcher);
+  expect(view.status).toBe('disabled');
+  entries[0].draft = 'Saved while paused'; saveEntries(localStorage, entries);
+  service.markDirty(); await vi.advanceTimersByTimeAsync(3000); await service.sync();
+  expect(fetcher).not.toHaveBeenCalled(); expect(replace).not.toHaveBeenCalled();
+  expect(readSync(localStorage)).toMatchObject({ token: TOKEN, version: 1, dirty: true });
+  expect(JSON.parse(localStorage.getItem(ENTRIES_KEY)!)[0].draft).toBe('Saved while paused');
+  expect(view.status).toBe('disabled'); service.dispose();
+});
 it('backs up newest local changes before applying a newer cloud version without merging', async () => {
   const remote = [{ ...createEntry([], 'daily'), draft: 'Computer cloud diary' }];
   const s = setup(remote, 2); await s.service.sync();

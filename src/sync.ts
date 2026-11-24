@@ -74,7 +74,8 @@ export class DiarySync {
     try {
       this.state = readSync(storage);
       this.backups = readSyncBackups(storage);
-      if (this.state) { this.status = 'pending'; this.message = '正在准备同步'; }
+      if (this.state && this.endpoint) { this.status = 'pending'; this.message = '正在准备同步'; }
+      if (!this.endpoint) this.message = '云同步已暂停，日记仅在本机保存';
     } catch (error) { this.broken = true; this.status = 'error'; this.message = (error as Error).message; }
     this.emit();
   }
@@ -90,6 +91,7 @@ export class DiarySync {
   markDirty() {
     if (!this.state || this.broken) return;
     this.persist({ ...this.state, dirty: true });
+    if (!this.endpoint) { this.setStatus('disabled', '云同步已暂停，日记仅在本机保存'); return; }
     this.setStatus('pending', '本地修改待上传');
     clearTimeout(this.timer);
     this.timer = setTimeout(() => { void this.sync(); }, 2000);
@@ -197,6 +199,7 @@ export class DiarySync {
   }
   async sync(): Promise<void> {
     if (this.disposed || !this.state || this.broken) return;
+    if (!this.endpoint) { this.setStatus('disabled', '云同步已暂停，日记仅在本机保存'); return; }
     if (this.running) { this.again = true; return; }
     if (!navigator.onLine) { this.setStatus('offline', '离线，本地内容待联网同步'); return; }
     this.running = true;
