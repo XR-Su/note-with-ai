@@ -227,7 +227,7 @@ export default function App() {
   const sidebar = <>
     <button className="brand" onClick={() => navigate(null)} aria-label="小日子首页"><span className="brand-mark"><Feather size={23} strokeWidth={1.6} /></span><span><strong>Little Days<span className="brand-dot">.</span></strong><small>小日子 · 用英文留住生活</small></span></button>
     <button className="new-entry" onClick={() => start('daily')}><Plus size={18} />记录今天<span>写一页新故事</span></button>
-    <nav className="sidebar-nav" aria-label="记录导航"><button className={!activeId ? 'active' : ''} onClick={() => navigate(null)}><BookOpen size={18} />我的小日子</button><button onClick={() => start('memory')}><History size={18} />拾起一段回忆<Plus size={15} className="nav-end" /></button></nav>
+    <nav className="sidebar-nav" aria-label="记录导航"><button onClick={() => start('memory')}><History size={18} />拾起一段回忆<Plus size={15} className="nav-end" /></button></nav>
     <div className="history-heading"><span>我的记录</span><span>{entries.length}</span></div>
     <div className="search-box"><Search size={15} /><input aria-label="搜索记录" placeholder="寻找某个小日子…" value={query} onChange={e => setQuery(e.target.value)} /></div>
     <div className="history-filters">{([['all', '全部'], ['daily', '日记'], ['memory', '回忆']] as const).map(([value, label]) => <button key={value} className={filter === value ? 'active' : ''} onClick={() => setFilter(value)}>{label}</button>)}</div>
