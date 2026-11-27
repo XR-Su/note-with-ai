@@ -1,16 +1,47 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { requestAI } from './ai';
 import { createEntry, defaultSettings } from './journal';
-import type { AIAction } from './types';
+import type { AIAction, Entry } from './types';
 
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
 const answer = { english: 'I went to the park.', explanation: '过去发生的事情用 went。', translation: false, question: 'How did you feel?', chinese: '你当时感觉如何？', title: 'A quiet day', summary: 'I enjoyed a quiet walk.' };
-const entry = () => ({ ...createEntry([], 'daily'), messages: [{ id: 'user', role: 'user' as const, content: 'I go to park yesterday.' }] });
+const entry = (): Entry => ({ ...createEntry([], 'daily'), messages: [{ id: 'user', role: 'user', content: 'I go to park yesterday.' }] });
 function respond(content = JSON.stringify(answer), status = 200, reason = 'stop') {
+  try {
+    content = JSON.stringify({ target_message_id: 'user', source_text: 'I go to park yesterday.', ...JSON.parse(content) });
+  } catch { /* Keep invalid JSON intact for parser tests. */ }
   const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({ choices: [{ message: { content }, finish_reason: reason }] }), { status }));
   vi.stubGlobal('fetch', fetcher);
   return fetcher;
 }
+it.each(['deepseek', 'minimax'] as const)('identifies the exact correction target separately from conversation context for %s', async provider => {
+  const current = entry();
+  current.messages.unshift({ id: 'previous', role: 'user', content: 'We did his annual review last year.' });
+  const fetcher = respond();
+  await requestAI(current, { ...defaultSettings, provider }, 'key', 'chat');
+  const body = JSON.parse(fetcher.mock.calls[0][1].body);
+  const payload = JSON.parse(body.messages[1].content);
+  expect(payload.correction_target).toEqual({ message_id: 'user', source_text: 'I go to park yesterday.' });
+  expect(payload.journal).toHaveLength(2);
+  expect(body.messages[0].content).toContain('Correct or translate ONLY correction_target.source_text');
+});
+it.each([
+  { target_message_id: 'previous' },
+  { source_text: 'We did his annual review last year.' },
+  { target_message_id: null },
+  { source_text: null },
+])('rejects a correction that does not identify its exact source %j without automatic retry', async fields => {
+  const fetcher = respond(JSON.stringify({ ...answer, ...fields }));
+  await expect(requestAI(entry(), defaultSettings, 'key', 'chat')).rejects.toThrow(/纠正内容与本次回答不匹配/);
+  expect(fetcher).toHaveBeenCalledTimes(1);
+});
+it('rejects correction requests without a final user answer before calling the provider', async () => {
+  const fetcher = respond();
+  const current = entry();
+  current.messages.push({ id: 'question', role: 'assistant', content: 'How was your day?' });
+  await expect(requestAI(current, defaultSettings, 'key', 'correct')).rejects.toThrow(/待纠正的回答/);
+  expect(fetcher).not.toHaveBeenCalled();
+});
 it('uses DeepSeek non-thinking JSON with only current entry', async () => {
   const fetcher = respond();
   expect(await requestAI(entry(), defaultSettings, 'test-key', 'chat')).toEqual(answer);
@@ -53,7 +84,7 @@ it.each([
   await requestAI({ ...entry(), mode }, { ...defaultSettings, memoryDays }, 'key', action as AIAction, undefined,
     [{ date: '2026-11-22', title: 'PRIVATE HISTORY', summary: 'PRIVATE SUMMARY' }]);
   const request = fetcher.mock.calls[0][1].body;
-  expect(request).not.toContain('archived_context');
+  expect(JSON.parse(JSON.parse(request).messages[1].content).archived_context).toBeUndefined();
   expect(request).not.toContain('PRIVATE');
 });
 it.each([['bad json', 'chat'], [JSON.stringify({ ...answer, question: '' }), 'chat'], [JSON.stringify({ ...answer, summary: '' }), 'archive']])('rejects malformed results %s', async (content, action) => {
