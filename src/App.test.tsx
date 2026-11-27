@@ -133,7 +133,10 @@ it('uses saved memory preferences on the next daily chat and stops sending histo
   history.messages.push({ id: 'old-user', role: 'user', content: 'PRIVATE HISTORICAL ORIGINAL', english: 'PRIVATE HISTORICAL TRANSLATION' });
   saveEntries(localStorage, [history]);
   persistSettings(localStorage, { ...defaultSettings, rememberKeys: true, keys: { deepseek: 'test-key', minimax: '' } });
-  const fetcher = vi.fn().mockImplementation(async () => new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(result) }, finish_reason: 'stop' }] })));
+  const fetcher = vi.fn().mockImplementation(async (_url, init) => {
+    const { correction_target: target } = JSON.parse(JSON.parse(init.body).messages[1].content);
+    return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ ...result, target_message_id: target.message_id, source_text: target.source_text }) }, finish_reason: 'stop' }] }));
+  });
   vi.stubGlobal('fetch', fetcher);
   render(<App />);
   fireEvent.click(screen.getByRole('button', { name: 'AI 设置' }));
@@ -162,6 +165,49 @@ function prepare() {
   render(<App />);
   fireEvent.click(screen.getByRole('button', { name: '记录今天' }));
 }
+
+it('keeps different answers bound to their own corrections and recovers from a previous-answer response', async () => {
+  const firstEnglish = 'We also conducted his annual review last year.';
+  const secondOriginal = 'He changed the team. He stayed in our team about 4 years, and changed to another team this year.';
+  const secondEnglish = 'He switched teams this year after about four years on our team.';
+  let previousTarget: { message_id: string; source_text: string };
+  let attempts = 0;
+  const fetcher = vi.fn(async (_url, init) => {
+    const payload = JSON.parse(JSON.parse(init.body).messages[1].content);
+    const target = payload.correction_target;
+    attempts += 1;
+    if (attempts === 1) previousTarget = target;
+    const echoed = attempts === 2 ? previousTarget : target;
+    const english = attempts <= 2 ? firstEnglish : secondEnglish;
+    return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({
+      ...result, english, question: attempts <= 2 ? 'What changed this year?' : 'How did he find his new team?',
+      target_message_id: echoed.message_id, source_text: echoed.source_text,
+    }) }, finish_reason: 'stop' }] }));
+  });
+  vi.stubGlobal('fetch', fetcher);
+  prepare();
+  fireEvent.change(screen.getByRole('textbox', { name: '你的回答' }), { target: { value: 'We also did his annual review last year.' } });
+  fireEvent.click(screen.getByRole('button', { name: '发送回答' }));
+  await screen.findByText(firstEnglish);
+  fireEvent.change(screen.getByRole('textbox', { name: '你的回答' }), { target: { value: secondOriginal } });
+  fireEvent.click(screen.getByRole('button', { name: '发送回答' }));
+  await screen.findByText(/纠正内容与本次回答不匹配/);
+  const failed = JSON.parse(localStorage.getItem(ENTRIES_KEY)!)[0].messages;
+  expect(failed.at(-1).content).toBe(secondOriginal);
+  expect(failed.at(-1).english).toBeUndefined();
+  expect(failed.filter((m: { role: string }) => m.role === 'assistant')).toHaveLength(2);
+  expect(screen.getAllByText(firstEnglish)).toHaveLength(1);
+  expect(fetcher).toHaveBeenCalledTimes(2);
+  fireEvent.click(screen.getByRole('button', { name: '重试本次请求' }));
+  await screen.findByText(secondEnglish);
+  const saved = JSON.parse(localStorage.getItem(ENTRIES_KEY)!)[0].messages.filter((m: { role: string }) => m.role === 'user');
+  expect(saved).toHaveLength(2);
+  expect(saved[0].english).toBe(firstEnglish);
+  expect(saved[1].english).toBe(secondEnglish);
+  expect(saved[1].content).toBe(secondOriginal);
+  expect(screen.getAllByText(firstEnglish)).toHaveLength(1);
+  expect(fetcher).toHaveBeenCalledTimes(3);
+});
 
 it('recovers an unanswered message by editing and generating a follow-up', async () => {
   const request = vi.spyOn(ai, 'requestAI').mockRejectedValueOnce(new Error('网络失败')).mockResolvedValue(result);

@@ -186,6 +186,7 @@ export default function App() {
     const key = settings.keys[settings.provider];
     if (!key) { setSettingsOpen(true); return; }
     const controller = new AbortController();
+    const targetId = action === 'archive' ? undefined : messageId || entry.messages.at(-1)?.id;
     operation.current = controller;
     setBusy(true);
     setAIError('');
@@ -197,7 +198,6 @@ export default function App() {
       if (controller.signal.aborted || operation.current !== controller) return;
       updateEntry(entry.id, current => {
         if (action === 'archive') return { ...current, title: result.title, summary: result.summary, archived: true };
-        const targetId = messageId || entry.messages.at(-1)?.id;
         const messages = current.messages.map(m => m.id === targetId ? { ...m, english: result.english, explanation: result.explanation, translation: result.translation } : m);
         if (action === 'chat') messages.push({ id: crypto.randomUUID(), role: 'assistant', content: result.question, chinese: result.chinese });
         return { ...current, messages };
@@ -205,7 +205,7 @@ export default function App() {
     } catch (error) {
       if (operation.current === controller && !controller.signal.aborted) {
         setAIError((error as Error).message);
-        setRetry({ entryId: entry.id, action, messageId });
+        setRetry({ entryId: entry.id, action, messageId: targetId });
       }
     } finally {
       if (operation.current === controller) { operation.current = null; setBusy(false); }
